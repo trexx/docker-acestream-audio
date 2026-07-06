@@ -1,0 +1,13 @@
+name: 'Build'
+
+on:
+  push:
+    tags: [ '*.*.*' ]
+
+jobs:
+  build:
+    uses: 'trexx/actions/.github/workflows/build.yml@main'
+    secrets: 'inherit'
+    permissions:
+      contents: read
+      packages: write

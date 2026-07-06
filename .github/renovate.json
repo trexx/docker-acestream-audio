@@ -1,0 +1,14 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "dependencyDashboard": true,
+  "extends": [
+    "docker:enableMajor",
+    "docker:pinDigests",
+    "default:automergeDigest",
+    "default:automergeMinor"
+  ],
+  "enabledManagers": [
+    "dockerfile",
+    "gomod"
+  ]
+}
