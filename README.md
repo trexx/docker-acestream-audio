@@ -4,12 +4,13 @@ A tiny Go service that strips the video track from an AceStream engine stream an
 ## Endpoint
 
 ```
-GET /audio?id=<40-hex content id>[&host=<engine[:port]>][&fmt=adts|mp3]
+GET /audio?id=<40-hex content id>[&fmt=adts|mp3]
 ```
 
 * `id` — the AceStream content id (40 hex chars, required).
-* `host` — the AceStream engine to pull from. Optional if the `ENGINE_HOST` env var is set.
 * `fmt` — output format. `adts` (AAC, default — browsers and Chromecast Audio both play it, and it keeps the stream-copy path) or `mp3` (fallback for devices that won't play ADTS).
+
+The engine to pull from comes from the required `ENGINE_HOST` env var.
 
 Also serves `/healthz` for probes.
 
@@ -29,21 +30,15 @@ Each request connects to the engine with a unique player id (`&pid=audio-…`), 
 | Env var | Default | Purpose |
 | --- | --- | --- |
 | `LISTEN_ADDR` | `:8080` | HTTP listen address |
-| `ENGINE_HOST` | *(unset)* | Default AceStream engine `host[:port]` when the request has no `?host=` |
+| `ENGINE_HOST` | *(required)* | AceStream engine `host[:port]` to pull streams from |
 
 ## Deployment
 
-Kubernetes manifests live in [`deploy/`](deploy/): a hardened single-replica Deployment with `/healthz` probes, a ClusterIP Service and an Ingress for `acestream-audio.apps.pixelman.me`. Set the ingress class/TLS bits for your controller (comments inline), then:
-
-```sh
-kubectl apply -k deploy/
-```
-
-Run it in the same cluster as the engine — it pulls the full muxed stream from the engine per listener.
+Run it in the same cluster as the engine — it pulls the full muxed stream from the engine per listener. Set `ENGINE_HOST` to the engine's in-cluster address; `/healthz` is there for probes.
 
 ## Casting to Chromecast Audio
 
-Audio-only cast targets can't decode the muxed TS — hand them this service's stream instead. Chromecast Audio plays AAC, so the default (ADTS) output works and keeps the stream-copy path: the device receives the original audio untouched. The webplayer's cast webhook payload includes a `transcoder` field when an audio host is configured; the Home Assistant automation should call `media_player.play_media` with `http://<transcoder>/audio?id=<id>&host=<engine>` and `media_content_type: "music"` for audio devices. If a device won't play ADTS, append `&fmt=mp3` as a fallback.
+Audio-only cast targets can't decode the muxed TS — hand them this service's stream instead. Chromecast Audio plays AAC, so the default (ADTS) output works and keeps the stream-copy path: the device receives the original audio untouched. The webplayer expects this service path-routed at `/audio` on the engine host, so the Home Assistant automation should call `media_player.play_media` with `http://<host from the cast payload>/audio?id=<id>` and `media_content_type: "music"` for audio devices. If a device won't play ADTS, append `&fmt=mp3` as a fallback.
 
 ## Local development
 

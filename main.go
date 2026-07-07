@@ -2,7 +2,7 @@
 // serves the audio over plain HTTP, so phones, cars and Chromecast Audios can
 // play it with a fraction of the data of the full muxed stream.
 //
-//	GET /audio?id=<40-hex content id>[&host=<engine[:port]>][&fmt=adts|mp3]
+//	GET /audio?id=<40-hex content id>[&fmt=adts|mp3]
 //
 // Copy-first: when the source audio is already decodable by browsers (AAC for
 // fmt=adts, MP3 for fmt=mp3) it is stream-copied untouched — no re-encode, no
@@ -26,21 +26,24 @@ import (
 const engineStallTimeout = "30000000"
 
 var (
-	idRe   = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
-	hostRe = regexp.MustCompile(`^[A-Za-z0-9.-]+(:[0-9]{1,5})?$`)
+	idRe       = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
+	engineHost = os.Getenv("ENGINE_HOST")
 )
 
 func main() {
+	if engineHost == "" {
+		log.Fatal("ENGINE_HOST must be set")
+	}
 	addr := envOr("LISTEN_ADDR", ":8080")
 	mux := http.NewServeMux()
 	mux.HandleFunc("/audio", audio)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprintln(w, "ok") })
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprintln(w, "usage: GET /audio?id=<40-hex content id>[&host=<engine[:port]>][&fmt=adts|mp3]")
+		fmt.Fprintln(w, "usage: GET /audio?id=<40-hex content id>[&fmt=adts|mp3]")
 	})
 	// WriteTimeout must stay 0: /audio responses stream for hours.
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
-	log.Printf("listening on %s (default engine host: %q)", addr, os.Getenv("ENGINE_HOST"))
+	log.Printf("listening on %s (engine host: %s)", addr, engineHost)
 	log.Fatal(srv.ListenAndServe())
 }
 
@@ -54,10 +57,6 @@ func envOr(key, fallback string) string {
 func audio(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	id := q.Get("id")
-	host := q.Get("host")
-	if host == "" {
-		host = os.Getenv("ENGINE_HOST")
-	}
 	outFmt := q.Get("fmt")
 	if outFmt == "" {
 		outFmt = "adts"
@@ -66,9 +65,6 @@ func audio(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case !idRe.MatchString(id):
 		http.Error(w, "id must be a 40-char hex content id", http.StatusBadRequest)
-		return
-	case !hostRe.MatchString(host):
-		http.Error(w, "missing or invalid engine host (pass ?host= or set ENGINE_HOST)", http.StatusBadRequest)
 		return
 	case outFmt != "adts" && outFmt != "mp3":
 		http.Error(w, "fmt must be adts or mp3", http.StatusBadRequest)
@@ -81,7 +77,7 @@ func audio(w http.ResponseWriter, r *http.Request) {
 	// playing the same stream directly. Probe and ffmpeg deliberately share the
 	// pid: the probe connection is closed before ffmpeg starts, and reusing it
 	// lets ffmpeg take over that engine session instead of leaving it dangling.
-	src := fmt.Sprintf("http://%s/ace/getstream?id=%s&pid=audio-%x", host, id, time.Now().UnixNano())
+	src := fmt.Sprintf("http://%s/ace/getstream?id=%s&pid=audio-%x", engineHost, id, time.Now().UnixNano())
 
 	codec, err := probeAudioCodec(r.Context(), src)
 	if err != nil {
