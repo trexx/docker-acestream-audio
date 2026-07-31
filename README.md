@@ -120,8 +120,8 @@ This guidance covers `/audio` only; `/video` has not been tested against a Chrom
 cargo test
 ENGINE_HOST=my-engine:6878 cargo run
 
-podman build -t acestream-audio .
-podman run --rm -p 8080:8080 -e ENGINE_HOST=my-engine:6878 acestream-audio
+podman build -t rust-acestream-proxy .
+podman run --rm -p 8080:8080 -e ENGINE_HOST=my-engine:6878 rust-acestream-proxy
 curl -v 'http://127.0.0.1:8080/audio?id=<content id>' | mpv -
 curl -v 'http://127.0.0.1:8080/video?id=<content id>' | mpv -
 ```

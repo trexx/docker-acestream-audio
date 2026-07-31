@@ -246,7 +246,7 @@ pub fn get(url: &str, read_timeout: Duration) -> io::Result<Response> {
         let mut w = &stream;
         write!(
             w,
-            "GET {} HTTP/1.1\r\nHost: {}:{}\r\nUser-Agent: acestream-audio\r\nConnection: close\r\nAccept: */*\r\n\r\n",
+            "GET {} HTTP/1.1\r\nHost: {}:{}\r\nUser-Agent: rust-acestream-proxy\r\nConnection: close\r\nAccept: */*\r\n\r\n",
             u.target, u.host, u.port
         )?;
         w.flush()?;

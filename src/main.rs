@@ -1,4 +1,4 @@
-//! acestream-audio: pulls an AceStream engine stream once and serves it to many
+//! rust-acestream-proxy: pulls an AceStream engine stream once and serves it to many
 //! listeners as audio (ADTS/MP3) or as fragmented MP4 with the video track
 //! stream-copied.
 //!
@@ -12,6 +12,7 @@
 
 mod engine;
 mod format;
+mod http;
 mod mp4;
 mod probe;
 mod registry;
@@ -19,16 +20,14 @@ mod status;
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::os::fd::AsRawFd;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
-use tiny_http::{Header, Request, Response, Server, StatusCode};
-
 use engine::log;
 use format::OutputFormat;
+use http::{Request, Response};
 use registry::{Config, Registry, Subscription};
 
 fn main() {
@@ -60,15 +59,6 @@ fn main() {
             std::process::exit(1);
         }
     };
-    set_nodelay(&listener);
-
-    let server = match Server::from_listener(listener, None) {
-        Ok(s) => s,
-        Err(e) => {
-            log::error(&format!("could not start the http server: {e}"));
-            std::process::exit(1);
-        }
-    };
 
     let registry = Registry::new(Config {
         engine_host: engine_host.clone(),
@@ -83,14 +73,32 @@ fn main() {
             .unwrap_or_else(|| "keyframe".into())
     ));
 
-    for request in server.incoming_requests() {
+    for stream in listener.incoming() {
+        let stream = match stream {
+            Ok(s) => s,
+            Err(e) => {
+                // One connection failing to arrive says nothing about the
+                // listener, which is still perfectly good. tiny_http shut the
+                // whole server down here, its open issue #283.
+                log::warn(&format!("could not accept a connection: {e}"));
+                continue;
+            }
+        };
         let registry = registry.clone();
         // A thread per request, deliberately not a pool: every stream is
         // long-lived, so a pool would be fully occupied by a handful of
         // listeners and new requests would never be served.
         if let Err(e) = thread::Builder::new()
             .name("request".into())
-            .spawn(move || handle(&registry, request, started))
+            .spawn(move || {
+                // Reading the head here rather than in the accept loop means a
+                // client that connects and then dawdles delays only itself.
+                match Request::read(stream) {
+                    Ok(request) => handle(&registry, request, started),
+                    // The peer has already been answered; nothing else to do.
+                    Err(e) => log::warn(&format!("rejected a request: {e}")),
+                }
+            })
         {
             log::error(&format!("could not spawn a request thread: {e}"));
         }
@@ -112,26 +120,6 @@ fn normalise_addr(addr: &str) -> String {
     }
 }
 
-/// tiny_http does not expose accepted sockets, but Linux copies TCP_NODELAY
-/// from the listener on accept, so setting it once here covers every listener.
-/// Without it Nagle can add up to 40ms per write, which is significant against
-/// a sub-100ms audio target.
-fn set_nodelay(listener: &TcpListener) {
-    let on: libc::c_int = 1;
-    let rc = unsafe {
-        libc::setsockopt(
-            listener.as_raw_fd(),
-            libc::IPPROTO_TCP,
-            libc::TCP_NODELAY,
-            &on as *const _ as *const libc::c_void,
-            std::mem::size_of_val(&on) as libc::socklen_t,
-        )
-    };
-    if rc != 0 {
-        log::warn("could not set TCP_NODELAY on the listener; expect added latency");
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Routing
 // ---------------------------------------------------------------------------
@@ -139,16 +127,16 @@ fn set_nodelay(listener: &TcpListener) {
 fn handle(registry: &Arc<Registry>, request: Request, started: Instant) {
     let url = request.url().to_owned();
     let path = url.split('?').next().unwrap_or("/").to_owned();
-    let method = request.method().as_str().to_owned();
+    let method = request.method().to_owned();
 
     if method == "OPTIONS" {
         // We advertise CORS, so answer the preflight even though a plain GET of
         // a media URL does not trigger one.
-        let _ = request.respond(
-            Response::empty(StatusCode(204))
-                .with_header(header("Access-Control-Allow-Origin", "*"))
-                .with_header(header("Access-Control-Allow-Methods", "GET, OPTIONS"))
-                .with_header(header("Access-Control-Allow-Headers", "*")),
+        request.respond(
+            Response::empty(204)
+                .with_header("Access-Control-Allow-Origin", "*")
+                .with_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+                .with_header("Access-Control-Allow-Headers", "*"),
         );
         return;
     }
@@ -161,11 +149,12 @@ fn handle(registry: &Arc<Registry>, request: Request, started: Instant) {
         "/healthz" => reply(request, 200, "ok"),
         "/status" => {
             let body = status::snapshot(registry, started).to_string();
-            let response = Response::from_string(body)
-                .with_header(header("Content-Type", "application/json"))
-                .with_header(header("Cache-Control", "no-store"))
-                .with_header(header("Access-Control-Allow-Origin", "*"));
-            let _ = request.respond(response);
+            request.respond(
+                Response::from_string(body)
+                    .with_header("Content-Type", "application/json")
+                    .with_header("Cache-Control", "no-store")
+                    .with_header("Access-Control-Allow-Origin", "*"),
+            );
         }
         _ => reply(
             request,
@@ -176,15 +165,12 @@ fn handle(registry: &Arc<Registry>, request: Request, started: Instant) {
     }
 }
 
-fn header(k: &str, v: &str) -> Header {
-    Header::from_bytes(k.as_bytes(), v.as_bytes()).expect("static header is valid")
-}
-
 fn reply(request: Request, code: u16, body: &str) {
-    let response = Response::from_string(body)
-        .with_status_code(StatusCode(code))
-        .with_header(header("Access-Control-Allow-Origin", "*"));
-    let _ = request.respond(response);
+    request.respond(
+        Response::from_string(body)
+            .with_status_code(code)
+            .with_header("Access-Control-Allow-Origin", "*"),
+    );
 }
 
 /// Extract a query parameter. Values here are a hex id and a fixed word list,
@@ -202,10 +188,7 @@ fn valid_content_id(id: &str) -> bool {
 }
 
 fn serve_stream(registry: &Arc<Registry>, request: Request, url: &str, path: &str) {
-    let peer = request
-        .remote_addr()
-        .map(|a| a.to_string())
-        .unwrap_or_else(|| "unknown".into());
+    let peer = request.peer().to_owned();
 
     let id = query_param(url, "id").unwrap_or_default();
     if !valid_content_id(&id) {
@@ -230,11 +213,11 @@ fn serve_stream(registry: &Arc<Registry>, request: Request, url: &str, path: &st
         }
     };
 
-    if request.method().as_str() == "HEAD" {
-        let _ = request.respond(
-            Response::empty(StatusCode(200))
-                .with_header(header("Content-Type", fmt.content_type()))
-                .with_header(header("Access-Control-Allow-Origin", "*")),
+    if request.method() == "HEAD" {
+        request.respond(
+            Response::empty(200)
+                .with_header("Content-Type", fmt.content_type())
+                .with_header("Access-Control-Allow-Origin", "*"),
         );
         return;
     }
@@ -254,16 +237,15 @@ fn serve_stream(registry: &Arc<Registry>, request: Request, url: &str, path: &st
 
 /// Write the response head and body straight to the socket.
 ///
-/// Deliberately bypasses `Request::respond`: tiny_http chooses Identity
-/// transfer encoding for HTTP/1.0 clients and for anything sending
-/// `TE: identity`, and with no known content length it then buffers the entire
-/// body through `read_to_end` — which on an endless stream never returns and
-/// grows without bound. Close-delimited framing (RFC 7230 §3.3.3) is valid for
-/// both HTTP/1.0 and HTTP/1.1 responses and costs only keep-alive, which is
-/// worthless when a connection carries exactly one hours-long stream.
+/// Deliberately bypasses `Request::respond`, which frames a response by its
+/// known length; a stream has no length to know. Close-delimited framing
+/// (RFC 9112 §6.3) is valid for both HTTP/1.0 and HTTP/1.1 and costs only
+/// keep-alive, which is worthless when a connection carries exactly one
+/// hours-long stream.
 ///
 /// It also puts flushing under our control, which is what makes the low-latency
-/// ffmpeg flags meaningful end to end.
+/// ffmpeg flags meaningful end to end. The socket is unbuffered for the same
+/// reason — see `http::Request::read`.
 fn stream_body(request: Request, fmt: OutputFormat, mut sub: Subscription) {
     let head = format!(
         "HTTP/1.1 200 OK\r\n\

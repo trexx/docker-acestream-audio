@@ -13,14 +13,14 @@ COPY src ./src
 RUN cargo build --release --locked
 
 FROM docker.io/mwader/static-ffmpeg:8.1.2-amd64@sha256:3bfa407c614a29a4535f1e3220fd9f6bc9cd7c25483036962e3c8ff711b56e01
-LABEL org.opencontainers.image.source="https://github.com/trexx/docker-acestream-audio"
+LABEL org.opencontainers.image.source="https://github.com/trexx/rust-acestream-proxy"
 
 # The base image ships /ffmpeg and /ffprobe at the filesystem root; the service
 # exec's them by name, so "/" must be on PATH.
 ENV PATH="/usr/local/bin:/"
 
-COPY --from=build /src/target/release/acestream-audio /usr/local/bin/acestream-audio
+COPY --from=build /src/target/release/rust-acestream-proxy /usr/local/bin/rust-acestream-proxy
 
 USER 65534:65534
 EXPOSE 8080
-ENTRYPOINT ["/usr/local/bin/acestream-audio"]
+ENTRYPOINT ["/usr/local/bin/rust-acestream-proxy"]

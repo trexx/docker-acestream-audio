@@ -5,16 +5,15 @@ edition = "2021"
 rust-version = "1.97"
 
 [dependencies]
-# Blocking HTTP server. Thread-per-request; see main.rs for why not a pool.
-tiny_http = "0.12"
 # Refcounted chunks: fanning one chunk to N subscribers must not be N heap copies.
 bytes = "1.12.1"
 # Engine handshake responses and the /status payload.
 serde_json = "1.0.151"
-# setsockopt(TCP_NODELAY) on the listener. tiny_http does not expose accepted
-# sockets, but Linux copies the flag to them on accept, so setting it once here
-# keeps Nagle from adding up to 40ms per write on a live stream.
-libc = "0.2.189"
+
+# The HTTP server is src/http.rs rather than a dependency. tiny_http, which used
+# to fill that role, has been unmaintained since 2023 and carries two advisories
+# with no fixed release (CVE-2026-66752, CVE-2026-66753); neither is mapped to
+# crates.io in OSV, so no scanner reports them. See that module for the details.
 
 [profile.release]
 lto = true
