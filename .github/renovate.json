@@ -9,6 +9,22 @@
   ],
   "enabledManagers": [
     "dockerfile",
-    "cargo"
+    "cargo",
+    "custom.regex"
+  ],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "automerge": true
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Keep Cargo.toml's rust-version in lockstep with the builder image tag. Same depName and datasource as the Dockerfile's rust image, so both land in one PR.",
+      "managerFilePatterns": ["/(^|/)Cargo\\.toml$/"],
+      "matchStrings": ["rust-version\\s*=\\s*\"(?<currentValue>\\d+\\.\\d+)\""],
+      "depNameTemplate": "rust",
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker"
+    }
   ]
 }

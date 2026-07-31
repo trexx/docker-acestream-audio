@@ -2,19 +2,19 @@
 name = "acestream-audio"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.95"
+rust-version = "1.97"
 
 [dependencies]
 # Blocking HTTP server. Thread-per-request; see main.rs for why not a pool.
 tiny_http = "0.12"
 # Refcounted chunks: fanning one chunk to N subscribers must not be N heap copies.
-bytes = "1.12"
+bytes = "1.12.1"
 # Engine handshake responses and the /status payload.
-serde_json = "1.0"
+serde_json = "1.0.151"
 # setsockopt(TCP_NODELAY) on the listener. tiny_http does not expose accepted
 # sockets, but Linux copies the flag to them on accept, so setting it once here
 # keeps Nagle from adding up to 40ms per write on a live stream.
-libc = "0.2"
+libc = "0.2.189"
 
 [profile.release]
 lto = true
