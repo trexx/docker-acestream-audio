@@ -1,4 +1,4 @@
-# docker-acestream-audio
+# rust-acestream-proxy
 A tiny Rust service that pulls an AceStream engine stream **once** and re-serves it to many listeners — as audio-only (for cars and phones) or as fragmented MP4 with the video track copied untouched (for browsers). The full muxed stream (~3–6 Mbps) becomes an audio stream of ~100–300 kbps, so the mobile-data leg shrinks by an order of magnitude. Pairs with [docker-acestream-webplayer](https://github.com/trexx/docker-acestream-webplayer)'s "Listen" mode.
 
 ## Endpoints
