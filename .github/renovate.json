@@ -9,6 +9,6 @@
   ],
   "enabledManagers": [
     "dockerfile",
-    "gomod"
+    "cargo"
   ]
 }
